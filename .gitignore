@@ -1,0 +1,14 @@
+# Sensitive / local files
+backend/.env
+backend/database/database.sqlite
+
+# Node
+node_modules/
+frontend/dist/
+whatsapp/node_modules/
+
+# WhatsApp session data
+whatsapp/.wwebjs_auth/
+
+# Logs
+*.log
