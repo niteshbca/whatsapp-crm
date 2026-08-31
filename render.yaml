@@ -17,14 +17,13 @@ services:
         value: https://whatsapp-crm-backend.onrender.com/api
 
   - type: web
-    runtime: php
+    runtime: docker
     name: whatsapp-crm-backend
     rootDir: backend
     plan: free
     region: singapore
     healthCheckPath: /up
-    buildCommand: composer install --no-dev --optimize-autoloader
-    startCommand: bash start.sh
+    dockerfilePath: ./Dockerfile
 
     envVars:
       - key: APP_KEY
@@ -37,10 +36,7 @@ services:
         value: false
 
       - key: APP_URL
-        fromService:
-          name: whatsapp-crm-backend
-          type: web
-          property: url
+        value: https://whatsapp-crm-backend.onrender.com
 
       - key: DB_CONNECTION
         value: pgsql
