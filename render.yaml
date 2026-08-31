@@ -28,7 +28,7 @@ services:
     startCommand: bash start.sh
     envVars:
       - key: APP_KEY
-        generateValue: true
+        value: base64:fWnt+C0E96xRXM4thtAbrQw+clHvCWlwnvuX9xMM83s=
       - key: APP_ENV
         value: production
       - key: APP_DEBUG
@@ -61,7 +61,7 @@ services:
           name: whatsapp-crm-db
           property: password
       - key: SESSION_DRIVER
-        value: cookie
+        value: file
       - key: QUEUE_CONNECTION
         value: sync
       - key: CACHE_STORE
