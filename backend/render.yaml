@@ -32,7 +32,7 @@ services:
       - key: APP_ENV
         value: production
       - key: APP_DEBUG
-        value: false
+        value: true
       - key: APP_URL
         fromService:
           name: whatsapp-crm-backend
@@ -66,5 +66,7 @@ services:
         value: sync
       - key: CACHE_STORE
         value: database
+      - key: LOG_CHANNEL
+        value: stderr
       - key: PROVIDER_TOKEN
         generateValue: true
