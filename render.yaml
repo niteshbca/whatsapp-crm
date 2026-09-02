@@ -6,13 +6,17 @@ databases:
     region: singapore
 
 services:
-  - type: static
+  - type: web
+    runtime: static
     name: whatsapp-crm-frontend
     rootDir: frontend
-    plan: free
     region: singapore
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: VITE_API_URL
         sync: false
