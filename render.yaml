@@ -68,7 +68,7 @@ services:
       - key: PROVIDER_TOKEN
         generateValue: true
       - key: WHATSAPP_SERVICE_URL
-        sync: false
+        value: https://whatsapp-crm-whatsapp.onrender.com
   - type: web
     name: whatsapp-crm-whatsapp
     runtime: docker
