@@ -16,7 +16,7 @@ services:
     envVars:
       - key: VITE_API_URL
         sync: false
-        value: https://whatsapp-crm-backend.onrender.com/api
+        value: https://whatsapp-crm-backend-g4xx.onrender.com/api
   - type: web
     name: whatsapp-crm-backend
     runtime: php
