@@ -18,7 +18,7 @@ return [
 
     'allowed_origins' => array_values(array_filter(explode(',', (string) env(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:5173,http://127.0.0.1:5173,https://whatsapp-crm-frontend.onrender.com,https://whatsapp-crm-backend.onrender.com,https://whatsapp-crm-backend-g4xx.onrender.com'
+        'http://localhost:5173,http://127.0.0.1:5173,https://whatsapp-crm-frontend.onrender.com,https://whatsapp-crm-frontend-w400.onrender.com,https://whatsapp-crm-backend.onrender.com,https://whatsapp-crm-backend-g4xx.onrender.com'
     )))),
 
     'allowed_origins_patterns' => [],
