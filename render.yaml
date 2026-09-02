@@ -67,3 +67,30 @@ services:
         value: stderr
       - key: PROVIDER_TOKEN
         generateValue: true
+      - key: WHATSAPP_SERVICE_URL
+        sync: false
+  - type: web
+    name: whatsapp-crm-whatsapp
+    runtime: docker
+    rootDir: whatsapp
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: LARAVEL_URL
+        value: https://whatsapp-crm-backend-g4xx.onrender.com
+      - key: PROVIDER_TOKEN
+        fromService:
+          name: whatsapp-crm-backend
+          type: web
+          envVarKey: PROVIDER_TOKEN
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium

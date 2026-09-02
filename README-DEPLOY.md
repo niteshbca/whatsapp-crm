@@ -3,13 +3,14 @@
 Aapke project ke 3 parts hain:
 | Part | Tech | Render pe kaise |
 |------|------|----------------|
-| Frontend | Vue 3 + Vite | **Static Site** |
-| Backend | Laravel (PHP) | **Web Service** (PHP runtime) |
-| WhatsApp service | Node.js (whatsapp-web.js) | Free tier pe **nahi chalegi** (niche dekho) |
+| Frontend | Vue 3 + Vite | **Static Site** (`type: web` + `runtime: static`) |
+| Backend | Laravel (PHP 8.4) | **Web Service** (`runtime: docker`, Dockerfile) |
+| WhatsApp service | Node.js (whatsapp-web.js) | **Web Service** (`runtime: docker`, Dockerfile + Chromium) |
 
-> **IMPORTANT:** Render free tier **ephemeral** storage hota hai (restart pe wipe). WhatsApp service ko
-> Qt/browser-based session + persistent disk chahiye, isliye usko Render free pe deploy mat karo —
-> wo apne laptop par chalao aur `WHATSAPP_SERVICE_URL` me backend ka public URL do.
+> **NOTE:** WhatsApp service Render free pe deploy ho sakti hai, lekin free tier **ephemeral** storage
+> hai — restart (ya 15 min idle) pe session wipe ho jata hai, isliye QR dobara scan karna padta hai.
+> Free tier WhatsApp-web.js ko WhatsApp ban bhi sakta hai (unofficial API). Production ke liye paid
+> instance ya persistent disk recommend karte hain.
 
 ---
 
@@ -40,69 +41,75 @@ git push -u origin main
 1. https://render.com par account banao (GitHub se signup).
 2. **Dashboard → New → Blueprint** par click karo.
 3. Apna GitHub repo connect karo.
-4. Render aapke liye **saari services khud bana dega** (blueprint `backend/render.yaml` se):
+4. Render aapke liye **saari services khud bana dega** (root `render.yaml` se):
    - `whatsapp-crm-db` → PostgreSQL database (free)
-   - `whatsapp-crm-backend` → Laravel Web Service
+   - `whatsapp-crm-backend` → Laravel Web Service (docker)
    - `whatsapp-crm-frontend` → Static Site
+   - `whatsapp-crm-whatsapp` → Node WhatsApp Web Service (docker)
 
 **Ye farak padta hai:** Blueprint ke liye `render.yaml` **repo ke root me** hona chahiye.
-Abhi wo `backend/render.yaml` hai. Isliye Root pe bhi copy banao (deploy se pehle step 2.5).
+Abhi wo root me hai (`./render.yaml`). Deploy ke baad Render tumhe har service ka public URL dega.
 
 ---
 
-## Step 2.5 — render.yaml ko root me copy karo
+## Step 2.5 — render.yaml root me hai (confirm)
 
 Render Blueprint sirf **root directory** ke `render.yaml` ko pack karta hai.
-`backend/render.yaml` me `rootDir: backend` already set hai, isliye bas root me copy banao:
+Root `render.yaml` me sab services defined hain (`rootDir` sahi set hai). Bas push karo aur sync karo.
 
 ```bash
-Copy-Item backend\render.yaml .\render.yaml
-git add render.yaml
-git commit -m "root blueprint"
+git add -A
+git commit -m "update render blueprint"
 git push
 ```
 
-Ab **Blueprint** deploy karo aur Render ko sab kuch khud banane do.
+Render par **Blueprint service** kholo → **Sync** (ya Manual Deploy) karo.
 
-> Agar Blueprint kuch error de, to usko chhodo aur **Manual** tarike se bhi bana sakte ho
-> (niche "Manual tarika" section).
+> Blueprint sync ke time Render `WHATSAPP_SERVICE_URL` (backend pe) ka value puch sakta hai —
+> shaant raho, pehle sync karke whatsapp service ka public URL dekh lo, phir `WHATSAAPP_SERVICE_URL`
+> me wo URL daal ke backend re-deploy karo (niche Step 4.5).
 
 ---
 
 ## Step 3 — Deploy ke baad verify karo
 
-Deploy complete hone ke baad Render tumhe 2 URL dega:
+Deploy complete hone ke baad Render tumhe URLs dega:
 
-- Backend: `https://whatsapp-crm-backend.onrender.com`
-- Frontend: `https://whatsapp-crm-frontend.onrender.com`
+- Backend: `https://whatsapp-crm-backend-g4xx.onrender.com`
+- Frontend: `https://whatsapp-crm-frontend-w400.onrender.com`
+- WhatsApp: `https://whatsapp-crm-whatsapp-XXXX.onrender.com`
 
 **Backend test:**
 ```
-https://whatsapp-crm-backend.onrender.com/up     → "ok" aana chahiye
-https://whatsapp-crm-backend.onrender.com/api/me → login message
+https://whatsapp-crm-backend-g4xx.onrender.com/up     → "ok" aana chahiye
+https://whatsapp-crm-backend-g4xx.onrender.com/api/me → login message
 ```
 
-> Note: `VITE_API_URL` abhi `https://whatsapp-crm-backend.onrender.com/api` set hai.
+> Note: `VITE_API_URL` (frontend) `https://whatsapp-crm-backend-g4xx.onrender.com/api` set hai.
 > Agar tumhara backend URL alag ho (jaise `...onrender.com` with suffix), to
 > Frontend service ke **Environment** me `VITE_API_URL` update karke **manual deploy** karo.
 
-**Frontend test:** browser me frontend URL kholo → trang login page dikhna chahiye.
+**Frontend test:** browser me frontend URL kholo → login page dikhna chahiye.
 
----
+## Step 4 — WhatsApp service ko link karo
 
-## Step 4 — WhatsApp login / setup karo
+Blueprint sync ke baad:
+1. WhatsApp service ka **public URL** note karo (Dashboard me service kholo).
+2. Backend service → **Environment** → `WHATSAPP_SERVICE_URL` me wo URL daalo:
+   ```
+   https://whatsapp-crm-whatsapp-XXXX.onrender.com
+   ```
+3. Backend ko **Manual Deploy** karo.
+4. Ab frontend me jao → WhatsApp tab → **Connect** → QR scan karo.
 
-WhatsApp service ko free cloud pe nahi, **apne laptop par** chalao:
+## Step 4.5 — WhatsApp login / setup
 
-```bash
-cd C:\Users\LENOVO\Desktop\free\whatsapp
-npm install
-# .env me LARAVEL_URL ko backend ka public URL do
-# LARAVEL_URL=https://whatsapp-crm-backend.onrender.com
-node index.js
-```
+WhatsApp service khud Render pe chalki hogi (`whatsapp-crm-whatsapp`).
+Browser me frontend me jao → WhatsApp connect karo → QR code scan karo.
 
-Phir browser me `http://127.0.0.1:3001` kholo aur **QR scan** karo.
+> Free tier par session ephemeral hai (restart pe wipe). Production ke liye paid instance
+> + persistent disk use karo. `whatsapp/Dockerfile` me `SESSION_DIR=/data/sessions` set hai —
+> Render pe disk attach karne par session persist rahegi.
 
 ---
 
@@ -111,20 +118,31 @@ Phir browser me `http://127.0.0.1:3001` kholo aur **QR scan** karo.
 ### Backend (Web Service)
 - **Type:** Web Service
 - **Root Directory:** `backend`
-- **Runtime:** PHP
-- **Build Command:** `composer install --no-dev --optimize-autoloader`
-- **Start Command:** `bash start.sh`
+- **Runtime:** Docker
+- **Dockerfile Path:** `./Dockerfile`
 - **Health Check Path:** `/up`
 - **Environment variables:**
   - `APP_ENV=production`
   - `APP_KEY` (generate karke set karo)
   - `DB_CONNECTION=pgsql`
   - `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` (Render PostgreSQL se)
-  - `SESSION_DRIVER=cookie`
+  - `SESSION_DRIVER=database`
   - `QUEUE_CONNECTION=sync`
   - `CACHE_STORE=database`
-  - `PROVIDER_TOKEN=` (koi bhi random secret)
-  - `WHATSAPP_SERVICE_URL=http://127.0.0.1:3001`
+  - `PROVIDER_TOKEN=` (koi bhi random secret — **backend aur whatsapp service DONO me same**)
+  - `WHATSAPP_SERVICE_URL=https://whatsapp-crm-whatsapp-XXXX.onrender.com`
+
+### WhatsApp service (Web Service)
+- **Type:** Web Service
+- **Root Directory:** `whatsapp`
+- **Runtime:** Docker
+- **Dockerfile Path:** `./Dockerfile`
+- **Health Check Path:** `/health`
+- **Environment variables:**
+  - `LARAVEL_URL=https://whatsapp-crm-backend-g4xx.onrender.com`
+  - `PROVIDER_TOKEN=` (backend wala SAME token)
+  - `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true`
+  - `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`
 
 ### Database
 Dashboard → New → **PostgreSQL** (free). Phir uske credentials ko backend env me daalo.
@@ -134,7 +152,7 @@ Dashboard → New → **PostgreSQL** (free). Phir uske credentials ko backend en
 - **Root Directory:** `frontend`
 - **Build Command:** `npm install && npm run build`
 - **Publish Directory:** `dist`
-- **Environment:** `VITE_API_URL=https://whatsapp-crm-backend.onrender.com/api`
+- **Environment:** `VITE_API_URL=https://whatsapp-crm-backend-g4xx.onrender.com/api`
 
 ---
 
@@ -142,13 +160,19 @@ Dashboard → New → **PostgreSQL** (free). Phir uske credentials ko backend en
 
 - **Health check fail / 502:** `/up` route phle se hai. Baaki logs dekho.
 - **Migration na ho:** `migrate --force` start.sh me hai. Logs me check karo.
-- **CORS error:** `config/cors.php` me `allowed_origins => ['*']` pehle se hai, theek hai.
+- **CORS error:** `config/cors.php` me allowed origins list hai — frontend ka **exact** origin
+  (`https://whatsapp-crm-frontend-w400.onrender.com`) usme hona chahiye.
 - **Data wipe hota hai:** SQLite free me ephemeral hai — isliye **PostgreSQL** use karo.
 - **BluePrint ke baad VITE_API_URL galat:** frontend ke Environment me fix karke re-deploy.
+- **WhatsApp "Failed to connect to 127.0.0.1:3001":** backend ka `WHATSAPP_SERVICE_URL` abhi
+  localhost par hai. Usse WhatsApp service ke public Render URL par set karke backend redeploy karo.
+- **WhatsApp QR dobara aata hai:** free tier ephemeral storage — session restart pe wipe.
+  Paid instance + disk, ya laptop par service chalao.
 
 ---
 
 ## Realistic expectation
 
 - **Laravel + Vue + PostgreSQL:** Render free pe **theek chalega**.
-- **WhatsApp (whatsapp-web.js):** apne laptop ya **paid** VPS/Railway pe chalao, free cloud nahi.
+- **WhatsApp (whatsapp-web.js):** Render free pe chal jayegi par session ephemeral hai
+  (restart pe wipe). Production ke liye laptop, ya paid VPS/Railway, ya persistent disk.
