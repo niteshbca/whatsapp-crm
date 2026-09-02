@@ -61,7 +61,7 @@ services:
           name: whatsapp-crm-db
           property: password
       - key: SESSION_DRIVER
-        value: file
+        value: database
       - key: QUEUE_CONNECTION
         value: sync
       - key: CACHE_STORE
