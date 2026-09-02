@@ -17,7 +17,27 @@ return Application::configure(basePath: dirname(__DIR__))
             'provider.token' => \App\Http\Middleware\EnsureProviderToken::class,
             'role' => \App\Http\Middleware\EnsureUserHasRole::class,
         ]);
+        $middleware->api(prepend: [
+            \Illuminate\Cookie\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+            \Illuminate\Session\Middleware\StartSession::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
+
+$directories = [
+    storage_path('framework/sessions'),
+    storage_path('framework/cache/data'),
+    storage_path('framework/views'),
+    storage_path('logs'),
+];
+
+foreach ($directories as $directory) {
+    if (! is_dir($directory)) {
+        @mkdir($directory, 0777, true);
+    }
+
+    @chmod($directory, 0777);
+}
