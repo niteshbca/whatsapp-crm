@@ -258,7 +258,9 @@ async function safelyReplaceClient(companyId, sessionName) {
     if (existing) {
       await disposeClient(companyId, existing, getCurrentState(companyId));
     }
-    return createClient(companyId, sessionName);
+    // Kick off a fresh client without awaiting the (slow) browser init, so
+    // /api/connect returns immediately and the frontend polls for the QR.
+    createClient(companyId, sessionName);
   });
   connectLocks.set(key, current.catch(() => {}));
   return current;
