@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import api from '../api'
 import { whatsapp, refreshWhatsapp, statusLabels } from '../store'
 
@@ -7,6 +7,7 @@ const busy = ref(false)
 const error = ref('')
 const companies = ref([])
 const companyId = ref('')
+let pollTimer = null
 
 async function loadCompanies() {
   const { data } = await api.get('/companies')
@@ -60,6 +61,13 @@ onMounted(async () => {
   } catch (e) {
     error.value = e.message
   }
+  pollTimer = setInterval(() => {
+    refreshSelected().catch(() => {})
+  }, 3000)
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 
@@ -95,7 +103,11 @@ onMounted(async () => {
 
         <div v-else class="qr-box">
           <span class="hint" style="max-width:200px">
-            {{ whatsapp.status === 'connecting' ? 'Starting browser…' : 'Click the button below to generate a QR code.' }}
+            {{
+              whatsapp.status === 'connecting'
+                ? 'Starting WhatsApp… this can take a few moments, please wait.'
+                : 'Click the button below to generate a QR code.'
+            }}
           </span>
         </div>
 

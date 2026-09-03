@@ -35,7 +35,7 @@ const dotClass =
 
 const route = useRoute()
 const refreshGlobalWhatsapp = () => {
-  if (route.path !== '/company') refreshWhatsapp()
+  if (route.path !== '/company' && route.path !== '/connect') refreshWhatsapp()
 }
 
 let timer
