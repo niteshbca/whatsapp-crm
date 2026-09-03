@@ -141,8 +141,11 @@ function createClient(companyId = null, sessionName = null) {
     },
     auth_failure: (msg) => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
+      const reasonText = typeof msg === 'string' ? msg : 'Authentication failed';
       state.status = 'auth_failure';
-      state.error = typeof msg === 'string' ? msg : 'Authentication failed';
+      state.error = reasonText;
+      console.error('[auth_failure]', companyId, reasonText);
+      disposeClient(companyId, client, state).catch(() => {});
     },
     ready: async () => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
@@ -175,11 +178,15 @@ function createClient(companyId = null, sessionName = null) {
     },
     disconnected: (reason) => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
+      const reasonText = typeof reason === 'string' ? reason : 'Disconnected';
+      abortAllCampaigns('WhatsApp disconnected');
       state.status = 'disconnected';
       state.phone = null;
-      state.error = typeof reason === 'string' ? reason : 'Disconnected';
+      state.error = reasonText === 'LOGOUT'
+        ? null
+        : `WhatsApp disconnected: ${reasonText}. Click Connect WhatsApp again to relink.`;
       console.warn('[disconnected]', companyId, reason);
-      abortAllCampaigns('WhatsApp disconnected');
+      disposeClient(companyId, client, state).catch(() => {});
     },
   };
 
@@ -211,6 +218,27 @@ function isConnected(companyId = null) {
   const state = getCurrentState(companyId);
   return Boolean(getCurrentClient(companyId)) && state.status === 'ready';
 }
+
+async function disposeClient(companyId, client, state, opts = {}) {
+  const key = getStateKey(companyId);
+  const current = getCurrentClient(companyId);
+  if (client && current === client) {
+    companyClients.delete(key);
+    companyInitPromises.delete(key);
+  }
+  if (client) {
+    try { client.removeAllListeners(); } catch {}
+    try { await client.destroy(); } catch {}
+  }
+  if (state && opts.reset !== false) {
+    state.logoutRequested = false;
+    state.qr = null;
+    state.phone = null;
+    state.name = null;
+  }
+}
+
+const TERMINAL_STATUSES = new Set(['error', 'auth_failure', 'disconnected', 'unlinked']);
 
 /* ------------------------------------------------------------------ */
 /* Campaign worker                                                      */
@@ -440,9 +468,18 @@ async function handleLogout(companyId = null) {
       }
 
       const targetDir = getClientSessionDir(companyId);
-      try {
-        fs.rmSync(targetDir, { recursive: true, force: true });
-      } catch {}
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          fs.rmSync(targetDir, { recursive: true, force: true });
+          break;
+        } catch (err) {
+          if (attempt === 4) {
+            console.warn('[logout] unable to remove session dir after retries', targetDir, err?.message || err);
+          } else {
+            await sleep(500);
+          }
+        }
+      }
     } catch {}
   })();
   companyCleanupPromises.set(key, cleanup);
@@ -496,7 +533,11 @@ app.post('/api/connect', (req, res) => {
     return res.status(400).json({ ok: false, error: 'company_id is required for WhatsApp connections' });
   }
 
-  if (!getCurrentClient(companyId)) {
+  const current = getCurrentClient(companyId);
+  const currentStatus = getCurrentState(companyId).status;
+  const needsFresh = !current || TERMINAL_STATUSES.has(currentStatus) || currentStatus === 'qr';
+  if (needsFresh) {
+    disposeClient(companyId, current, getCurrentState(companyId)).catch(() => {});
     createClient(companyId, sessionName);
   }
 
@@ -608,6 +649,10 @@ app.get('/health', (req, res) => {
     status: connected ? 'ready' : (states[0]?.status || 'unlinked'),
     campaigns: campaigns.size,
   });
+});
+
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: 'Not found' });
 });
 
 app.listen(PORT, () => {

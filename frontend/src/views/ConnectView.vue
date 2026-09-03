@@ -71,6 +71,7 @@ onMounted(async () => {
     </div>
 
     <div v-if="error" class="alert error">{{ error }}</div>
+    <div v-else-if="whatsapp.error" class="alert error">{{ whatsapp.error }}</div>
 
     <div class="connect-wrap">
       <div class="connect-toolbar">
