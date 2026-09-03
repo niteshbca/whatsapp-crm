@@ -113,6 +113,14 @@ function createClient(companyId = null, sessionName = null) {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--no-zygote',
+        '--js-flags=--max-old-space-size=160',
       ],
     },
   });
@@ -239,6 +247,22 @@ async function disposeClient(companyId, client, state, opts = {}) {
 }
 
 const TERMINAL_STATUSES = new Set(['error', 'auth_failure', 'disconnected', 'unlinked']);
+
+const connectLocks = new Map();
+
+async function safelyReplaceClient(companyId, sessionName) {
+  const key = getStateKey(companyId);
+  const previous = connectLocks.get(key) || Promise.resolve();
+  const current = previous.then(async () => {
+    const existing = getCurrentClient(companyId);
+    if (existing) {
+      await disposeClient(companyId, existing, getCurrentState(companyId));
+    }
+    return createClient(companyId, sessionName);
+  });
+  connectLocks.set(key, current.catch(() => {}));
+  return current;
+}
 
 /* ------------------------------------------------------------------ */
 /* Campaign worker                                                      */
@@ -524,7 +548,7 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-app.post('/api/connect', (req, res) => {
+app.post('/api/connect', async (req, res) => {
   const companyId = req.body.company_id ? Number(req.body.company_id) : null;
   const sessionName = req.body.session_name || null;
   const state = getCurrentState(companyId);
@@ -537,8 +561,7 @@ app.post('/api/connect', (req, res) => {
   const currentStatus = getCurrentState(companyId).status;
   const needsFresh = !current || TERMINAL_STATUSES.has(currentStatus) || currentStatus === 'qr';
   if (needsFresh) {
-    disposeClient(companyId, current, getCurrentState(companyId)).catch(() => {});
-    createClient(companyId, sessionName);
+    await safelyReplaceClient(companyId, sessionName);
   }
 
   res.json({

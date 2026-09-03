@@ -10,16 +10,19 @@ class WhatsAppService
 
     protected int $timeout;
 
+    protected int $connectTimeout;
+
     protected int $sendTimeout;
 
     public function __construct()
     {
         $this->baseUrl = rtrim((string) config('services.whatsapp.url'), '/');
-        $this->timeout = (int) config('services.whatsapp.timeout', 10);
         $this->sendTimeout = (int) config('services.whatsapp.send_timeout', 120);
-    }
-
-    public function isReachable(): bool
+        // Quick timeouts for lightweight control calls (status/connect/logout)
+        // so a slow or restarting WhatsApp service never blocks the backend.
+        $this->timeout = (int) config('services.whatsapp.timeout', 8);
+        $this->connectTimeout = (int) config('services.whatsapp.connect_timeout', 3);
+    }    public function isReachable(): bool
     {
         return ! array_key_exists('error', $this->status());
     }
@@ -35,7 +38,7 @@ class WhatsAppService
                 $url .= '?company_id=' . urlencode((string) $companyId);
             }
 
-            $response = Http::timeout($this->timeout)->get($url);
+            $response = Http::timeout($this->timeout)->connectTimeout($this->connectTimeout)->get($url);
 
             if ($response->ok()) {
                 return $response->json() ?? [];
@@ -61,7 +64,7 @@ class WhatsAppService
                 $payload['session_name'] = $sessionName;
             }
 
-            $response = Http::timeout($this->timeout)->post("{$this->baseUrl}/api/connect", $payload);
+            $response = Http::timeout($this->timeout)->connectTimeout($this->connectTimeout)->post("{$this->baseUrl}/api/connect", $payload);
 
             return $response->json() ?? ['error' => $response->body()];
         } catch (\Throwable $e) {
@@ -80,7 +83,7 @@ class WhatsAppService
                 $payload['company_id'] = $companyId;
             }
 
-            $response = Http::timeout($this->timeout)->post("{$this->baseUrl}/api/logout", $payload);
+            $response = Http::timeout($this->timeout)->connectTimeout($this->connectTimeout)->post("{$this->baseUrl}/api/logout", $payload);
 
             return $response->json() ?? ['error' => $response->body()];
         } catch (\Throwable $e) {
