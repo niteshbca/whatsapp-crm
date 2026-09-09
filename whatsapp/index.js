@@ -16,10 +16,41 @@ const AUTH_CLIENT_ID = String(process.env.WA_CLIENT_ID || 'whatsapp-crm');
 const DEFAULT_DELAY_MIN = Number(process.env.DELAY_MIN || 2) * 1000;
 const DEFAULT_DELAY_MAX = Number(process.env.DELAY_MAX || 5) * 1000;
 
+// Proxy: residential proxy se WhatsApp connect hota hai (Render pe zaroori)
+// Format: socks5://user:pass@host:port  OR  http://host:port  OR  socks5://host:port
+const PROXY_URL = process.env.PROXY_URL || '';
+// Puppeteer executable: Docker/Render mein system chromium use hota hai
+const PUPPETEER_EXE = process.env.PUPPETEER_EXECUTABLE_PATH || '';
+
+// Parse proxy auth from URL (socks5://user:pass@host:port → { server, user, pass })
+function parseProxy(raw) {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const server = `${url.protocol}//${url.hostname}:${url.port}`;
+    return {
+      server,
+      user: url.username || '',
+      pass: url.password || '',
+    };
+  } catch {
+    return { server: raw, user: '', pass: '' };
+  }
+}
+const PROXY = parseProxy(PROXY_URL);
+
 const companyClients = new Map();
 const companyStates = new Map();
 const companyInitPromises = new Map();
 const companyCleanupPromises = new Map();
+
+// Rate limiting protection
+const connectAttempts = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_CONNECT_ATTEMPTS = 3;
+const RETRY_DELAY_BASE = 5000; // 5 seconds
+const COOLDOWN_MS = 5 * 60 * 1000; // 5 minute cooldown after 429
+const companyCooldowns = new Map(); // key -> timestamp when cooldown expires
 
 function getStateKey(companyId) {
   return companyId ? String(companyId) : 'default';
@@ -91,6 +122,33 @@ async function notifyLaravel(payload) {
 /* WhatsApp client lifecycle                                            */
 /* ------------------------------------------------------------------ */
 
+function canAttemptConnect(companyId) {
+  const key = getStateKey(companyId);
+  const now = Date.now();
+  
+  // Check if in cooldown (after a 429)
+  const cooldownUntil = companyCooldowns.get(key) || 0;
+  if (now < cooldownUntil) {
+    const waitTime = Math.ceil((cooldownUntil - now) / 1000);
+    return { allowed: false, waitTime, cooldown: true };
+  }
+  
+  const attempts = connectAttempts.get(key) || [];
+  
+  // Remove old attempts outside the window
+  const recentAttempts = attempts.filter(t => now - t < RATE_LIMIT_WINDOW);
+  
+  if (recentAttempts.length >= MAX_CONNECT_ATTEMPTS) {
+    const oldestAttempt = recentAttempts[0];
+    const waitTime = Math.ceil((RATE_LIMIT_WINDOW - (now - oldestAttempt)) / 1000);
+    return { allowed: false, waitTime };
+  }
+  
+  recentAttempts.push(now);
+  connectAttempts.set(key, recentAttempts);
+  return { allowed: true };
+}
+
 function createClient(companyId = null, sessionName = null) {
   const key = getStateKey(companyId);
   if (companyInitPromises.has(key)) {
@@ -102,6 +160,42 @@ function createClient(companyId = null, sessionName = null) {
   const state = getCurrentState(companyId);
   state.logoutRequested = false;
   state.status = 'connecting';
+
+  // Use a real installed Chrome + matching user-agent to avoid WhatsApp's
+  // automation detection (bundled Chromium headless is flagged → 429).
+  // On Docker/Render, PUPPETEER_EXECUTABLE_PATH points to system chromium.
+  const REAL_CHROME = PUPPETEER_EXE || [
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    process.env.LOCALAPPDATA + '/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  ].find((p) => { try { return require('fs').existsSync(p); } catch { return false; } });
+
+  const puppeteerArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--no-zygote',
+    '--js-flags=--max-old-space-size=512',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-features=IsolateOrigins,site-per-process',
+    '--window-size=1366,768',
+    '--lang=en-US',
+    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+  ];
+
+  // Residential proxy se connect karo (Render pe datacenter IP block hota hai)
+  if (PROXY) {
+    puppeteerArgs.push(`--proxy-server=${PROXY.server}`);
+    console.log(`[proxy] Using proxy: ${PROXY.server}${PROXY.user ? ' (with auth)' : ''}`);
+  }
+
   const client = new Client({
     authStrategy: new LocalAuth({
       clientId: `${AUTH_CLIENT_ID}-${resolvedSessionName}`,
@@ -109,31 +203,32 @@ function createClient(companyId = null, sessionName = null) {
     }),
     puppeteer: {
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-        '--disable-extensions',
-        '--disable-background-networking',
-        '--disable-default-apps',
-        '--disable-sync',
-        '--no-zygote',
-        '--js-flags=--max-old-space-size=160',
-      ],
+      executablePath: REAL_CHROME || undefined,
+      args: puppeteerArgs,
+      ignoreHTTPSErrors: true,
+      defaultViewport: { width: 1366, height: 768 },
     },
   });
+
 
   const events = {
     qr: (qr) => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
       state.status = 'qr';
       state.error = null;
+      // Reset QR timeout to keep it visible longer
+      if (state.qrTimeout) clearTimeout(state.qrTimeout);
       QRCode.toDataURL(qr, { width: 280, margin: 1 })
         .then((url) => {
           if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
           state.qr = url;
+          // QR expires after 20 seconds, keep it visible for user
+          state.qrTimeout = setTimeout(() => {
+            if (state.status === 'qr' && state.qr) {
+              state.error = 'QR code expired. Click Connect WhatsApp again.';
+              state.status = 'expired';
+            }
+          }, 30000); // 30 seconds
         })
         .catch((err) => {
           state.error = 'Failed to render QR: ' + err.message;
@@ -142,6 +237,8 @@ function createClient(companyId = null, sessionName = null) {
     loading_screen: () => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
       state.status = 'connecting';
+      if (state.qrTimeout) clearTimeout(state.qrTimeout);
+      state.qrTimeout = null;
     },
     authenticated: () => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
@@ -157,9 +254,25 @@ function createClient(companyId = null, sessionName = null) {
     },
     ready: async () => {
       if (state.logoutRequested || !isCurrentClient(companyId, client)) return;
+      if (state.qrTimeout) clearTimeout(state.qrTimeout);
       if (client && client.pupPage) {
         try {
-          await client.pupPage.evaluate(() => {
+          const evalPromise = client.pupPage.evaluate(() => {
+            if (navigator.webdriver !== undefined) {
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            }
+            if (window.navigator) {
+              const nav = window.navigator;
+              if (nav.permissions && nav.permissions.query) {
+                const origQuery = nav.permissions.query.bind(nav.permissions);
+                nav.permissions.query = (parameters) => {
+                  if (parameters && parameters.name === 'notifications') {
+                    return Promise.resolve({ state: Notification.permission });
+                  }
+                  return origQuery(parameters);
+                };
+              }
+            }
             if (window.WWebJS && window.WWebJS.injectToFunction) {
               window.WWebJS.injectToFunction(
                 { module: 'WAWebLid1X1MigrationGating', function: 'Lid1X1MigrationUtils.isLidMigrated' },
@@ -171,6 +284,10 @@ function createClient(companyId = null, sessionName = null) {
               );
             }
           });
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('pupPage.evaluate timeout')), 10000)
+          );
+          await Promise.race([evalPromise, timeoutPromise]);
         } catch (e) {
           console.error('[lid-patch]', e.message);
         }
@@ -210,8 +327,21 @@ function createClient(companyId = null, sessionName = null) {
   companyInitPromises.set(key, cleanup.then(() => client.initialize()).catch(async (err) => {
     console.error('[initialize]', companyId, err.message);
     if (state.logoutRequested) return;
-    state.status = 'error';
-    state.error = String(err.message || err);
+    
+    // Handle 429 rate limit error - set long cooldown
+    const errMsg = String(err.message || err);
+    if (errMsg.includes('429')) {
+      state.status = 'rate_limited';
+      state.error = 'WhatsApp has rate limited this account. Please wait 5 minutes before trying again.';
+      companyCooldowns.set(key, Date.now() + COOLDOWN_MS);
+      // Reset attempt counter so user can retry after cooldown
+      connectAttempts.delete(key);
+      console.error('[rate-limit] Company', companyId, ': 429 received. Cooldown set for 5 minutes.');
+    } else {
+      state.status = 'error';
+      state.error = errMsg;
+    }
+    
     if (isCurrentClient(companyId, client)) {
       companyClients.delete(key);
       companyInitPromises.delete(key);
@@ -234,6 +364,7 @@ async function disposeClient(companyId, client, state, opts = {}) {
     companyClients.delete(key);
     companyInitPromises.delete(key);
   }
+  if (state && state.qrTimeout) clearTimeout(state.qrTimeout);
   if (client) {
     try { client.removeAllListeners(); } catch {}
     try { await client.destroy(); } catch {}
@@ -246,18 +377,35 @@ async function disposeClient(companyId, client, state, opts = {}) {
   }
 }
 
-const TERMINAL_STATUSES = new Set(['error', 'auth_failure', 'disconnected', 'unlinked']);
+const TERMINAL_STATUSES = new Set(['error', 'auth_failure', 'disconnected', 'unlinked', 'expired', 'rate_limited']);
 
 const connectLocks = new Map();
 
 async function safelyReplaceClient(companyId, sessionName) {
   const key = getStateKey(companyId);
+  
+  // Check rate limiting
+  const rateCheck = canAttemptConnect(companyId);
+  if (!rateCheck.allowed) {
+    const msg = rateCheck.cooldown
+      ? `WhatsApp is cooling down after rate limit. Wait ${rateCheck.waitTime} seconds.`
+      : `Too many connection attempts. Please wait ${rateCheck.waitTime} seconds before trying again.`;
+    console.warn(`[rate-limit] Company ${companyId}: ${msg}`);
+    return { 
+      ok: false, 
+      error: msg,
+      waitTime: rateCheck.waitTime
+    };
+  }
+  
   const previous = connectLocks.get(key) || Promise.resolve();
   const current = previous.then(async () => {
     const existing = getCurrentClient(companyId);
     if (existing) {
       await disposeClient(companyId, existing, getCurrentState(companyId));
     }
+    // Add delay between attempts to avoid 429
+    await sleep(3000);
     // Kick off a fresh client without awaiting the (slow) browser init, so
     // /api/connect returns immediately and the frontend polls for the QR.
     createClient(companyId, sessionName);
@@ -416,63 +564,32 @@ async function doSend(to, message, mediaPath, companyId = null, mediaPaths = [])
     });
   };
 
-  const trySendList = async (candidates) => {
-    let lastError = null;
-    for (const candidate of dedupe(candidates)) {
-      try {
-        const sent = await attemptSend(candidate);
-        if (sent) {
-          return { ok: true, messageId: sent.id?.id || null };
-        }
-      } catch (err) {
-        lastError = err;
-        console.warn('[doSend send-fallback]', candidate, err?.message || err);
-      }
-    }
-    return { ok: false, lastError };
-  };
-
-  const primaryCandidates = [
+  // Try sending with different chat ID formats
+  const candidates = dedupe([
     `${baseNumber}@c.us`,
     `${baseNumber}@s.whatsapp.net`,
     baseNumber,
-  ];
+  ]);
 
-  let result = await trySendList(primaryCandidates);
-  if (result.ok) {
-    return result;
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      const sent = await attemptSend(candidate);
+      if (sent) {
+        return { ok: true, messageId: sent.id?.id || null };
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn('[doSend]', candidate, err?.message || err);
+    }
   }
 
-  try {
-    const results = await client.getContactLidAndPhone(`${baseNumber}@c.us`);
-    const resolved = [];
-    for (const entry of Array.isArray(results) ? results : []) {
-      if (entry?.lid) resolved.push(String(entry.lid));
-      if (entry?.pn) resolved.push(String(entry.pn));
-      if (entry?.phone) resolved.push(String(entry.phone));
-    }
+  // Return the actual error from WhatsApp
+  const errorText = lastError && typeof lastError.message === 'string'
+    ? lastError.message
+    : 'Message could not be delivered. The recipient may not be on WhatsApp or the number is invalid.';
 
-    result = await trySendList(resolved.length ? resolved : []);
-    if (result.ok) {
-      return result;
-    }
-  } catch (err) {
-    console.error('[doSend lid-fallback]', err?.message || err);
-    result.lastError = err;
-  }
-
-  const lastError = result.lastError;
-  const messageText = lastError && typeof lastError.message === 'string'
-      ? lastError.message
-      : 'Unable to resolve this number on WhatsApp (no LID available). The number may not be registered on WhatsApp.';
-
-  return {
-    ok: false,
-    error:
-      (messageText.includes('no LID available') || messageText.includes('Unable to resolve this number on WhatsApp'))
-        ? 'Unable to resolve this number on WhatsApp (no LID available). The number may not be registered on WhatsApp.'
-        : messageText,
-  };
+  return { ok: false, error: errorText };
 }
 
 async function handleLogout(companyId = null) {
@@ -524,6 +641,9 @@ async function handleLogout(companyId = null) {
     state.phone = null;
     state.name = null;
     state.error = null;
+    // Clear cooldown and attempt history on explicit logout
+    companyCooldowns.delete(key);
+    connectAttempts.delete(key);
   }
 }
 
@@ -539,6 +659,9 @@ app.get('/api/status', (req, res) => {
   const companyId = req.query.company_id ? Number(req.query.company_id) : null;
   const state = getCurrentState(companyId);
   const client = getCurrentClient(companyId);
+  const key = getStateKey(companyId);
+  const cooldownUntil = companyCooldowns.get(key) || 0;
+  const cooldownRemaining = cooldownUntil > Date.now() ? Math.ceil((cooldownUntil - Date.now()) / 1000) : 0;
 
   res.json({
     connected: Boolean(client) && state.status === 'ready',
@@ -547,6 +670,7 @@ app.get('/api/status', (req, res) => {
     phone: state.phone,
     name: state.name,
     error: state.error,
+    cooldown: cooldownRemaining,
   });
 });
 
@@ -561,9 +685,27 @@ app.post('/api/connect', async (req, res) => {
 
   const current = getCurrentClient(companyId);
   const currentStatus = getCurrentState(companyId).status;
-  const needsFresh = !current || TERMINAL_STATUSES.has(currentStatus) || currentStatus === 'qr';
+  // IMPORTANT: If already showing QR, DON'T recreate the client.
+  // Recreating kills the QR instantly (that was the bug).
+  const needsFresh = !current || TERMINAL_STATUSES.has(currentStatus);
+  
+  // If rate limited, return error with wait time (503 = Service Unavailable, not 429)
+  if (currentStatus === 'rate_limited') {
+    const result = canAttemptConnect(companyId);
+    return res.status(503).json({ 
+      ok: false, 
+      error: result.cooldown 
+        ? `WhatsApp rate limited. Please wait ${result.waitTime} seconds before trying again.`
+        : 'WhatsApp rate limited. Please wait and try again.',
+      waitTime: result.waitTime
+    });
+  }
+  
   if (needsFresh) {
-    await safelyReplaceClient(companyId, sessionName);
+    const result = await safelyReplaceClient(companyId, sessionName);
+    if (result && !result.ok) {
+      return res.status(503).json(result);
+    }
   }
 
   res.json({

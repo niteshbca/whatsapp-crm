@@ -102,13 +102,19 @@ onUnmounted(() => {
         </div>
 
         <div v-else class="qr-box">
-          <span class="hint" style="max-width:200px">
+          <span class="hint" style="max-width:220px">
             {{
               whatsapp.status === 'connecting'
                 ? 'Starting WhatsApp… this can take a few moments, please wait.'
+                : whatsapp.status === 'expired'
+                ? 'QR code expired. Click Connect WhatsApp again for a fresh one.'
                 : 'Click the button below to generate a QR code.'
             }}
           </span>
+        </div>
+
+        <div v-if="whatsapp.status === 'rate_limited'" class="alert warn">
+          WhatsApp is rate limiting this account. Please wait a few minutes before trying again.
         </div>
 
         <p class="hint" style="max-width:340px">
@@ -116,7 +122,7 @@ onUnmounted(() => {
           and scan the QR code shown here.
         </p>
 
-        <button class="btn green block" :disabled="busy" @click="connect">
+        <button class="btn green block" :disabled="busy || whatsapp.status === 'rate_limited'" @click="connect">
           <span v-if="busy" class="spinner"></span>
           {{ whatsapp.status === 'qr' ? 'Refresh QR code' : 'Connect WhatsApp' }}
         </button>

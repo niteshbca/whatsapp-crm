@@ -37,7 +37,8 @@ return [
 
     'whatsapp' => [
         'url' => env('WHATSAPP_SERVICE_URL', 'http://127.0.0.1:3001'),
-        'timeout' => (int) env('WHATSAPP_SERVICE_TIMEOUT', 10),
+        'timeout' => (int) env('WHATSAPP_SERVICE_TIMEOUT', 15),
+        'connect_timeout' => (int) env('WHATSAPP_CONNECT_TIMEOUT', 5),
         'send_timeout' => (int) env('WHATSAPP_SEND_TIMEOUT', 120),
     ],
 

@@ -1,7 +1,10 @@
 import axios from 'axios'
 
+const rawBase = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
+const baseURL = /\/api\/?$/.test(rawBase) ? rawBase : rawBase.replace(/\/+$/, '') + '/api'
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api',
+  baseURL,
   timeout: 60000,
   withCredentials: true,
 })

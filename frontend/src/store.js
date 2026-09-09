@@ -9,12 +9,17 @@ export const whatsapp = reactive({
   name: null,
   error: null,
   loading: true,
+  companyId: null,
 })
 
 export async function refreshWhatsapp(companyId = null) {
+  if (companyId !== null) {
+    whatsapp.companyId = companyId
+  }
+  const effectiveCompanyId = companyId ?? whatsapp.companyId
   try {
     const { data } = await api.get('/whatsapp/status', {
-      params: companyId ? { company_id: companyId } : {},
+      params: effectiveCompanyId ? { company_id: effectiveCompanyId } : {},
     })
     whatsapp.connected = Boolean(data.connected)
     whatsapp.status = data.status || 'unlinked'
@@ -40,4 +45,6 @@ export const statusLabels = {
   auth_failure: 'Authentication failed',
   error: 'Error',
   service_down: 'Service offline',
+  rate_limited: 'Rate limited - wait before retrying',
+  expired: 'QR expired',
 }

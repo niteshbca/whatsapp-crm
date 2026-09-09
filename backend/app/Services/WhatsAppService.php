@@ -20,8 +20,8 @@ class WhatsAppService
         $this->sendTimeout = (int) config('services.whatsapp.send_timeout', 120);
         // Quick timeouts for lightweight control calls (status/connect/logout)
         // so a slow or restarting WhatsApp service never blocks the backend.
-        $this->timeout = (int) config('services.whatsapp.timeout', 8);
-        $this->connectTimeout = (int) config('services.whatsapp.connect_timeout', 3);
+        $this->timeout = (int) config('services.whatsapp.timeout', 15);
+        $this->connectTimeout = (int) config('services.whatsapp.connect_timeout', 5);
     }    public function isReachable(): bool
     {
         return ! array_key_exists('error', $this->status());
